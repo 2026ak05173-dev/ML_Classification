@@ -1,0 +1,15 @@
+# Environments and caches
+.venv/
+venv/
+env/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ipynb_checkpoints/
+.DS_Store
+
+# Credentials and temporary files
+.env
+.streamlit/secrets.toml
+*.tmp
+*.log
