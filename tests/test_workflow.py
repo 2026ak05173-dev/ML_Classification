@@ -193,3 +193,106 @@ def test_committed_models_and_metrics_are_consistent(splits):
     table = tm.metrics_table(loaded, X_test, y_test)
     saved = pd.read_csv(tm.METRICS_PATH)
     pd.testing.assert_frame_equal(table, saved, check_exact=False, rtol=1e-9)
+
+
+from src import upload_validation as uv
+
+BUNDLED = dp.TEST_DATA_PATH.read_bytes()
+
+
+def test_bundled_csv_passes_upload_validation(splits):
+    _, X_test, _, y_test = splits
+    X, y = uv.load_test_upload(BUNDLED)
+    assert list(X.columns) == dp.FEATURE_COLUMNS
+    assert y.tolist() == y_test.tolist()
+
+
+def test_upload_reorders_columns_to_training_schema():
+    df = uv.read_uploaded_csv(BUNDLED)
+    shuffled = df[list(reversed(df.columns))]
+    X, _ = uv.validate_test_frame(shuffled)
+    assert list(X.columns) == dp.FEATURE_COLUMNS
+
+
+def test_missing_columns_listed():
+    df = uv.read_uploaded_csv(BUNDLED).drop(columns=["radius_mean", "diagnosis"])
+    with pytest.raises(uv.UploadError) as exc:
+        uv.validate_test_frame(df)
+    text = " ".join(exc.value.messages)
+    assert "radius_mean" in text and "diagnosis" in text
+
+
+def test_unexpected_columns_rejected():
+    df = uv.read_uploaded_csv(BUNDLED)
+    df["id"] = 1
+    with pytest.raises(uv.UploadError, match="Unexpected columns: id"):
+        uv.validate_test_frame(df)
+
+
+def test_empty_and_header_only_files_rejected():
+    for data in (b"", b"   \n"):
+        with pytest.raises(uv.UploadError, match="empty"):
+            uv.read_uploaded_csv(data)
+    header_only = ",".join(dp.FEATURE_COLUMNS + ["diagnosis"]).encode()
+    with pytest.raises(uv.UploadError, match="no data rows"):
+        uv.load_test_upload(header_only)
+
+
+def test_duplicate_headers_detected_before_pandas_renames():
+    with pytest.raises(uv.UploadError, match="Duplicate column names found: a"):
+        uv.read_uploaded_csv(b"a,a,b\n1,2,3\n")
+
+
+def test_bad_values_rejected():
+    base = uv.read_uploaded_csv(BUNDLED)
+
+    bad = base.copy()
+    bad.loc[0, "area_mean"] = np.nan
+    with pytest.raises(uv.UploadError, match="Missing values"):
+        uv.validate_test_frame(bad)
+
+    bad = base.copy()
+    bad.loc[0, "area_mean"] = np.inf
+    with pytest.raises(uv.UploadError, match="Infinite"):
+        uv.validate_test_frame(bad)
+
+    bad = base.copy()
+    bad["area_mean"] = bad["area_mean"].astype(object)
+    bad.loc[0, "area_mean"] = "abc"
+    with pytest.raises(uv.UploadError, match="Non-numeric"):
+        uv.validate_test_frame(bad)
+
+    bad = base.copy()
+    bad["diagnosis"] = bad["diagnosis"].astype(object)
+    bad.loc[0, "diagnosis"] = "M"
+    with pytest.raises(uv.UploadError, match="Invalid 'diagnosis'"):
+        uv.validate_test_frame(bad)
+
+
+def test_single_class_upload_evaluates_without_crashing():
+    df = uv.read_uploaded_csv(BUNDLED)
+    for label in (0, 1):
+        X, y = uv.validate_test_frame(df[df["diagnosis"] == label])
+        for pipeline in tm.load_pipelines().values():
+            result = ev.evaluate_model(pipeline, X, y)
+            assert result["metrics"]["AUC"] is None
+            assert result["confusion_matrix"].shape == (2, 2)
+            assert all(np.isfinite(v) for k, v in result["metrics"].items() if k != "AUC")
+
+
+def test_app_renders_bundled_results_matching_saved_metrics():
+    from streamlit.testing.v1 import AppTest
+
+    at = AppTest.from_file(str(dp.PROJECT_ROOT / "app.py"), default_timeout=60).run()
+    assert not at.exception
+    next(b for b in at.button if "bundled" in b.label).click()
+    at.run()
+    assert not at.exception
+    assert len(at.metric) == 6
+    assert [s.label for s in at.selectbox] == ["Model"]
+    table = at.dataframe[-1].value
+    saved = pd.read_csv(tm.METRICS_PATH)
+    assert list(table["ML Model Name"]) == list(saved["ML Model Name"])
+    assert list(table["Accuracy"]) == [f"{v:.4f}" for v in saved["Accuracy"]]
+    at.selectbox[0].select("svm").run()
+    assert not at.exception
