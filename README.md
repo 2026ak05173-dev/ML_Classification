@@ -6,7 +6,6 @@ Machine Learning : five classification models on one public dataset, demonstrate
 
 Predict whether a breast mass is **malignant** or **benign** from 30 numeric measurements of cell nuclei computed from digitized fine needle aspirate images. This is a binary classification task. Five classifiers (Logistic Regression, Decision Tree, K-Nearest Neighbors, Gaussian Naive Bayes and Support Vector Machine) are trained on the same training split, evaluated on the same held-out rows with six metrics (Accuracy, AUC, Precision, Recall, F1, MCC) and compared. A Streamlit app lets a user upload a test CSV, choose a model and inspect its metrics and confusion matrix using the saved models only.
 
-This is an educational benchmark, not a clinical tool.
 
 ## b. Dataset description
 
@@ -34,11 +33,32 @@ The ten base measurements are radius, texture, perimeter, area, smoothness, comp
 - Preprocessing (standard scaling) is fitted on the training partition only, inside each model pipeline.
 - `test_data.csv` holds the 114 held-out rows: 30 raw feature columns plus the encoded `diagnosis` column, no index column.
 
-**Attribution:** data donated by Nick Street and created by Dr. William H. Wolberg, W. Nick Street and Olvi L. Mangasarian (University of Wisconsin). See the UCI page and `data/wdbc.names` for the full citation and terms of use.
 
 ## c. GitHub Repository Link
 
 <https://github.com/2026ak05173-dev/ML_Classification>
+
+
+### Streamlit app
+
+[`app.py`](app.py) provides:
+
+- CSV upload (test data only), a button to evaluate the bundled `test_data.csv`, and a download of that example file.
+- A model dropdown for the five saved pipelines.
+- The six evaluation metrics, a labelled confusion matrix (benign/malignant) and a classification report for the selected model.
+- A comparison table of all five models computed on the same uploaded rows.
+- Saved-model inference only: pipelines are loaded from `model/`; the app never calls `fit`.
+
+### Run locally
+
+```bash
+pip install -r requirements.txt
+python -m src.data_prep       # validate data, create the split, write test_data.csv
+python -m src.train_models    # fit, save model/*.pkl, reload and verify, write results/metrics_summary.csv
+streamlit run app.py
+python -m pytest tests        # needs pytest (not listed in requirements.txt)
+```
+
 
 ## d. Models used
 
@@ -57,51 +77,9 @@ Precision, Recall and F1 are for the malignant class (1). Confusion-matrix error
 | ML Model Name | Observation about model performance |
 |---|---|
 | Logistic Regression | Second-best overall (accuracy 0.9649, F1 0.9512) and the highest AUC (0.9960). It made 4 errors on 114 rows (1 FP, 3 FN), so it separates the classes well and is close to the SVM. |
-| Decision Tree | Weakest AUC (0.9246) and lower accuracy (0.9298) than the linear and kernel models, with 8 errors split evenly (4 FP, 4 FN). Its probability scores are coarse (leaf proportions), which may explain the lower AUC; this was not tested. |
+| Decision Tree | Weakest AUC (0.9246) and lower accuracy (0.9298) than the linear and kernel models, with 8 errors split evenly (4 FP, 4 FN). Its probability scores are coarse (leaf proportions), which may explain the lower AUC.  |
 | KNN | Accuracy 0.9561 with high precision (0.9744) but recall of 0.9048: 1 FP and 4 FN. AUC 0.9823 is good but below Logistic Regression, SVM and Naive Bayes. Fixed at k=5 without tuning. |
-| Naive Bayes | Lowest accuracy (0.9211), recall (0.8571), F1 (0.8889) and MCC (0.8292); it missed 6 of 42 malignant cases. Its AUC is high (0.9891), so it ranks cases well while its default decision threshold gives more false negatives. The feature-independence assumption may be a factor; this was not tested. |
+| Naive Bayes | Lowest accuracy (0.9211), recall (0.8571), F1 (0.8889) and MCC (0.8292); it missed 6 of 42 malignant cases. Its AUC is high (0.9891), so it ranks cases well while its default decision threshold gives more false negatives. The feature-independence assumption may be a factor.  |
 | Support Vector Machine | Best accuracy (0.9737), precision (1.0000, no false positives), F1 (0.9630) and MCC (0.9442), with 3 FN and AUC 0.9947 (second to Logistic Regression). |
 | **Overall winner for this dataset** | **Support Vector Machine**, using the predeclared selection metric (malignant-class F1: 0.9630 vs 0.9512 for Logistic Regression). It also has the best MCC and fewest errors (3 of 114), with recall tied with Logistic Regression at 0.9286. The margin is one or two test rows from a single split with untuned models, so Logistic Regression is a near tie and no general superiority or clinical suitability is claimed. |
-
----
-
-## Additional information
-
-### Streamlit app
-
-[`app.py`](app.py) provides:
-
-- CSV upload (test data only), a button to evaluate the bundled `test_data.csv`, and a download of that example file.
-- A model dropdown for the five saved pipelines.
-- The six evaluation metrics, a labelled confusion matrix (benign/malignant) and a classification report for the selected model.
-- A comparison table of all five models computed on the same uploaded rows.
-- Saved-model inference only: pipelines are loaded from `model/`; the app never calls `fit`.
-
-**Upload validation** ([`src/upload_validation.py`](src/upload_validation.py)) gives actionable messages for empty files, header-only files, duplicate column names (checked before pandas renames them), missing required columns, unexpected columns, non-numeric/missing/infinite feature values and invalid target labels. Valid columns are reordered to the training schema, and the target is never used as a model input. A file with only one true class is accepted: AUC is shown as N/A with an explanation, and precision, recall and F1 use `zero_division=0` (MCC is 0 when it is undefined).
-
-**CSV schema:** the 30 feature columns listed in `src/data_prep.py` (`radius_mean` ... `fractal_dimension_worst`) plus `diagnosis` (0 = benign, 1 = malignant). See `test_data.csv`.
-
-**Live app:** to be added once deployed on Streamlit Community Cloud (repository above, branch `main`, entry point `app.py`).
-
-### Run locally
-
-```bash
-pip install -r requirements.txt
-python -m src.data_prep       # validate data, create the split, write test_data.csv
-python -m src.train_models    # fit, save model/*.pkl, reload and verify, write results/metrics_summary.csv
-streamlit run app.py
-python -m pytest tests        # needs pytest (not listed in requirements.txt)
-```
-
-### Evaluation and persistence
-
-- [`src/evaluation.py`](src/evaluation.py) holds the single evaluation function used by both training and the app. AUC uses class-1 probabilities (Logistic Regression, Decision Tree, KNN, Naive Bayes) or `decision_function` scores (SVM), never hard labels. The confusion matrix uses label order `[0, 1]`.
-- Each complete fitted pipeline, scaler included, is saved with `pickle` to `model/` (`logistic_regression.pkl`, `decision_tree.pkl`, `knn.pkl`, `naive_bayes.pkl`, `svm.pkl`). Each is reloaded and checked for identical predictions and scores.
-- Only load `.pkl` files produced by this project: unpickling untrusted files can execute code. The app has no model-upload feature. Models must be loaded with the pinned scikit-learn version.
-
-### Tested environment and verification status
-
-- Local (macOS): Python 3.10.16, with the versions in `requirements.txt` (streamlit 1.44.1, scikit-learn 1.6.1, numpy 2.2.3, pandas 2.2.3, matplotlib 3.10.3).
-- Verified locally: installation of `requirements.txt` into a fresh virtual environment; 29 automated tests passing (data checks, split, pipelines, evaluation, pickle round-trip, upload validation, single-class uploads, and app rendering of the bundled file matching `results/metrics_summary.csv`); the app server starting and answering its health check.
-
 
