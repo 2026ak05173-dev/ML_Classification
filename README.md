@@ -39,7 +39,7 @@ The ten base measurements are radius, texture, perimeter, area, smoothness, comp
 <https://github.com/2026ak05173-dev/ML_Classification>
 
 
-### Streamlit app
+### Streamlit app (Streamlit App deployment URL - https://mlclassification-cancer-diagnosis.streamlit.app/)
 
 [`app.py`](app.py) provides:
 
